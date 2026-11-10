@@ -182,9 +182,9 @@
     <p id="initial-fw">Detecting firmware&hellip;</p>
     <button id="start-btn" class="btn-primary" type="button">Start Jailbreak</button>
     <p class="hint">
-      elfldr and pldmgr are saved to this console the moment the page opens.
-      Tap Start (or the logo) to jailbreak, then send any payload from the
-      built-in payload manager - no extra hosting needed.
+      elfldr is saved to this console the moment the page opens. Tap Start (or
+      the logo) to jailbreak - only elfldr auto-loads, then send any payload
+      (pldmgr included) from the built-in payload manager.
     </p>
   </section>
 
@@ -205,7 +205,6 @@
         <div id="DebugConsole"><div id="console"></div></div>
         <div class="controls">
           <button id="run-btn" class="btn-round hidden" type="button" title="Run the jailbreak again">&#9654;</button>
-          <button id="pldmgr-btn" class="btn-ghost hidden" type="button">send pldmgr again</button>
         </div>
       </div>
 
@@ -233,14 +232,197 @@
     </main>
   </section>
 
-  <script src="./src/firmware.js?v=20261111a"></script>
-  <script src="./src/main.js?v=20261111a"></script>
-  <script src="./src/rop.js?v=20261111a"></script>
-  <script src="./src/utils/syscalls.js?v=20261111a"></script>
-  <script src="./src/payload_data.js?v=20261111a"></script>
-  <script src="./src/payload_cache.js?v=20261111a"></script>
-  <script src="./src/payload_catalog.js?v=20261111a"></script>
-  <script src="./src/ui.js?v=20261111a"></script>
-  <script type="module" src="./src/site.js?v=20261111a"></script>
+  <script>
+  /* Relapse bootstrap - the ONLY script tag in the page.
+   *
+   * Dual-mode self-caching:
+   *  - https / localhost origins: the site scripts load from ./src/... and a
+   *    service worker (sw.js) keeps the whole site inside the PS5 webkit cache.
+   *  - plain-http origins (self-hosting, e.g. http://<pc-ip>:12423): service
+   *    workers do not exist there, so every site asset is mirrored into PS5
+   *    localStorage on the first visit and served inline from it afterwards -
+   *    the page then runs with zero server contact beyond this small HTML
+   *    shell, which is exactly what "cache itself to port 12423" needs.
+   *
+   * Bump VERSION on every deploy: it busts both the ?v= URLs and the
+   * localStorage cache keys (stale entries are purged automatically).
+   */
+  (function () {
+    "use strict";
+
+    var VERSION = "20261112a";
+
+    /* Executed in this order - dependency-safe (see each file's header). */
+    var ASSETS = [
+      "./src/utils/int64.js",
+      "./src/utils/syscalls.js",
+      "./src/rop.js",
+      "./src/utils/mem.js",
+      "./src/webkit.js",
+      "./src/firmware.js",
+      "./src/kexp.js",
+      "./src/relapse_exploit.js",
+      "./src/inject.js",
+      "./src/payload_data.js",
+      "./src/payload_cache.js",
+      "./src/payload_catalog.js",
+      "./src/main.js",
+      "./src/ui.js",
+      "./src/site.js"
+    ];
+
+    /* Cached like the rest but never executed here: the rop worker script,
+     * which main.js turns into a blob worker on offline boots. */
+    var CACHE_LIST = ASSETS.concat(["./src/utils/rop_slave.js"]);
+
+    var PREFIX = "relapse:site:v:";
+    var STAMP_KEY = "relapse:site:stamp";
+    var FRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+    var swCapable = (location.protocol === "https:" ||
+      location.hostname === "127.0.0.1" ||
+      location.hostname === "localhost" ||
+      location.hostname === "[::1]") &&
+      typeof navigator !== "undefined" && navigator.serviceWorker;
+
+    function note(message) {
+      try {
+        if (window.writeLog) window.writeLog(message, "info");
+      } catch (e) { /* site.js not up yet - stay quiet */ }
+    }
+
+    function writeSrcTags() {
+      for (var i = 0; i < ASSETS.length; i++)
+        document.write('<script src="' + ASSETS[i] + "?v=" + VERSION + '"><\/script>');
+    }
+
+    /* Make cached script text safe to inline: "<\/script" is identical to
+     * "</script" inside JS strings and regexes but cannot close the tag. */
+    function escapeForInline(text) {
+      return String(text)
+        .replace(/<\!--/g, "<\\!--")
+        .replace(/<\/script/gi, "<\\/script");
+    }
+
+    function writeInlineTags(cache) {
+      for (var i = 0; i < ASSETS.length; i++) {
+        document.write('<script data-site="' + ASSETS[i] + '">' +
+          escapeForInline(cache[ASSETS[i]]) + "<\/script>");
+      }
+    }
+
+    function purgeStaleVersions() {
+      try {
+        var keep = PREFIX + VERSION + ":";
+        var doomed = [];
+        for (var i = 0; i < localStorage.length; i++) {
+          var key = localStorage.key(i);
+          if (key && key.indexOf(PREFIX) === 0 && key.indexOf(keep) !== 0)
+            doomed.push(key);
+        }
+        for (var d = 0; d < doomed.length; d++) localStorage.removeItem(doomed[d]);
+      } catch (e) { /* storage unavailable - network mode */ }
+    }
+
+    function loadCached() {
+      var cache = {};
+      var complete = true;
+      try {
+        for (var i = 0; i < CACHE_LIST.length; i++) {
+          var text = localStorage.getItem(PREFIX + VERSION + ":" + CACHE_LIST[i]);
+          if (typeof text !== "string" || text.length === 0) { complete = false; break; }
+          cache[CACHE_LIST[i]] = text;
+        }
+      } catch (e) { return { cache: null, complete: false }; }
+      return { cache: cache, complete: complete };
+    }
+
+    function fetchText(path) {
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", path + "?v=" + VERSION, true);
+        xhr.timeout = 60000;
+        xhr.onload = function () {
+          if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
+          else reject(new Error("HTTP " + xhr.status));
+        };
+        xhr.onerror = function () { reject(new Error("network error")); };
+        xhr.ontimeout = function () { reject(new Error("timeout")); };
+        xhr.send();
+      });
+    }
+
+    function saveAsset(path, text) {
+      try {
+        localStorage.setItem(PREFIX + VERSION + ":" + path, text);
+        return true;
+      } catch (e) { return false; }
+    }
+
+    /* First visit on this origin: fetch + store every asset quietly; the
+     * next boot then runs fully from PS5 storage. */
+    function populate() {
+      var failures = 0;
+      var done = 0;
+      var total = CACHE_LIST.length;
+      function finish() {
+        if (failures === 0) {
+          window.__RELAPSE_CACHE_STATE__ = "offline-saved";
+          try { localStorage.setItem(STAMP_KEY, String(Date.now())); } catch (e) {}
+          note("site cached to the PS5 webkit - it opens without the server from now on");
+        } else {
+          note("PS5 site cache is incomplete (" + failures + " file(s) failed) - retrying on the next visit");
+        }
+      }
+      CACHE_LIST.forEach(function (path) {
+        fetchText(path).then(function (text) {
+          if (!saveAsset(path, text)) failures++;
+          done++;
+          if (done === total) finish();
+        }).catch(function () {
+          failures++;
+          done++;
+          if (done === total) finish();
+        });
+      });
+    }
+
+    /* Quiet weekly refresh: the boot stays instant, the stored copy re-syncs. */
+    function refreshIfStale() {
+      var stamp = 0;
+      try { stamp = parseInt(localStorage.getItem(STAMP_KEY) || "0", 10) || 0; } catch (e) {}
+      if (stamp && Date.now() - stamp < FRESH_MS) return;
+      CACHE_LIST.forEach(function (path) {
+        fetchText(path).then(function (text) {
+          saveAsset(path, text);
+        }).catch(function () { /* offline right now - keep the stored copy */ });
+      });
+      try { localStorage.setItem(STAMP_KEY, String(Date.now())); } catch (e) {}
+    }
+
+    if (swCapable) {
+      /* Secure origin: service worker caching (sw.js) handles everything. */
+      writeSrcTags();
+      return;
+    }
+
+    /* Plain-http self-host (e.g. port 12423): PS5-storage mode. */
+    purgeStaleVersions();
+    var stored = loadCached();
+    window.__RELAPSE_ASSET_TEXT__ = function (path) {
+      return (stored.cache && stored.cache[path]) || null;
+    };
+
+    if (stored.complete) {
+      window.__RELAPSE_CACHE_STATE__ = "offline";
+      writeInlineTags(stored.cache);
+      refreshIfStale();
+    } else {
+      window.__RELAPSE_CACHE_STATE__ = "populating";
+      writeSrcTags();
+      populate();
+    }
+  })();
+  </script>
 </body>
 </html>

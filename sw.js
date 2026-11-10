@@ -13,7 +13,7 @@
  * Releasing an update: bump VERSION below (any byte change to sw.js makes the
  * browser reinstall it and refresh the cache).
  */
-const VERSION = "relapse-pldmgr-v7.0";
+const VERSION = "relapse-pldmgr-v8.0";
 const CORE = [
   "./",
   "./index.html",
@@ -34,7 +34,6 @@ const CORE = [
   "./src/utils/rop_slave.js",
   "./src/utils/syscalls.js",
   "./payloads/elfldr-ps5-1360.elf",
-  "./payloads/pldmgr_v0.6.3.elf",
   "./payloads/kexp_2026_05_25.bin",
   "./offsets/13.60.js",
 ];

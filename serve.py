@@ -3,7 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 
-PORT = 8000
+PORT = 12423
 ROOT = Path(__file__).resolve().parent
 
 class Handler(http.server.SimpleHTTPRequestHandler):
