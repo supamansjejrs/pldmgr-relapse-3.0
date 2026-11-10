@@ -1,5 +1,11 @@
-import { establishPrimitive } from "./webkit.js";
-import { installWindowP } from "./utils/mem.js";
+/* Relapse site boot - classic script (loaded last by the bootstrap in
+ * index.html) so the page stays loadable from PS5 localStorage on plain-http
+ * hosts, where module imports cannot be served from storage.
+ *
+ * Page boot does NOT run the exploit: the chain waits for the Start button
+ * (or a payload card tap, which queues + auto-starts). */
+(function () {
+"use strict";
 
 const output = document.getElementById("console");
 
@@ -28,26 +34,50 @@ function writeEvent(name, detail, type) {
 window.writeLog = writeLog;
 window.jb = { mark: writeEvent };
 
-/* Kick off the PS5 storage cache immediately: elfldr AND pldmgr (plus the
- * kexp shellcode) are mirrored into localStorage the moment the page opens,
- * before any exploit stage runs - so repeat runs need zero network. */
+/* Kick off the PS5 storage cache immediately: the kexp shellcode and elfldr
+ * are mirrored into localStorage the moment the page opens - before any
+ * exploit stage runs - so repeat runs need zero network. */
 function preloadSiteData() {
   if (!window.PS5PayloadCache || !window.PS5PayloadCache.preloadAll) return;
   Promise.resolve(window.PS5PayloadCache.preloadAll(writeLog)).catch(() => {});
 }
 
-/* Best-effort offline caching of the site itself: a service worker keeps
- * every page asset inside the PS5 webkit cache so the page opens instantly
- * and keeps working without the network. Plain-http hosting has no service
- * worker support - there the localStorage payload cache + HTTP cache
- * headers still apply. */
+/* Service workers only exist on secure origins (https / localhost). On a
+ * self-hosted plain-http origin (e.g. http://<pc-ip>:12423) the bootstrap in
+ * index.html mirrors every site asset into PS5 localStorage instead and
+ * serves the next visit straight from it - report which mode is active. */
+function swCapableOrigin() {
+  return location.protocol === "https:" ||
+    location.hostname === "127.0.0.1" ||
+    location.hostname === "localhost" ||
+    location.hostname === "[::1]";
+}
+
+function reportCacheMode() {
+  const port = location.port || (location.protocol === "https:" ? "443" : "80");
+  const mode = window.__RELAPSE_CACHE_STATE__;
+  if (mode === "offline")
+    writeLog("site served from the PS5 offline copy on port " + port +
+      " - no server contact needed", "info");
+  else if (mode === "populating")
+    writeLog("saving this site to the PS5 (port " + port +
+      ") - it will open without the server from now on", "info");
+}
+
 function registerServiceWorker() {
+  if (!swCapableOrigin()) {
+    reportCacheMode();
+    return;
+  }
   try {
-    if (!navigator.serviceWorker) return;
+    if (!navigator.serviceWorker) {
+      reportCacheMode();
+      return;
+    }
     navigator.serviceWorker.register("./sw.js")
       .then(() => writeLog("site cached to the PS5 webkit (service worker active)", "info"))
-      .catch(() => {});
-  } catch (e) { /* unsupported - ignore */ }
+      .catch(() => reportCacheMode());
+  } catch (e) { /* unsupported - the bootstrap cache still applies */ }
 }
 
 const OFFSETS_CACHE_DAYS = 7;
@@ -118,7 +148,8 @@ async function loadOffsets(fw) {
 
 async function getPrimitive() {
   writeLog("Starting WebKit exploit");
-  const primitive = installWindowP(await establishPrimitive(writeEvent));
+  const primitive = window.RelapseMem.installWindowP(
+    await window.RelapseWebKit.establishPrimitive(writeEvent));
   if (!primitive || typeof primitive.read8 !== "function")
     throw new Error("Memory primitive unavailable");
 
@@ -160,16 +191,16 @@ async function initPage() {
   const versions = window.PS5_PAYLOAD_ENTRIES || {};
   writeLog("Payloads: kexp v" + ((versions.kexp || {}).version || "2026-05-25") +
     " runs first, elfldr v" + ((versions.elfldr || {}).version || "13.60") +
-    " starts on port 9021, pldmgr v" + ((versions.pldmgr || {}).version || "0.6.3") +
-    " is injected straight into it (all saved to PS5 storage)", "info");
+    " is the only thing auto-loaded (port 9021, saved to PS5 storage)", "info");
   writeLog("press Start Jailbreak - or tap any payload to jailbreak and send it in one go", "info");
 
   if (window.RelapseUI) window.RelapseUI.setState("idle");
 }
 
 /* The start button / payload-card entry point. Runs the full chain:
- * webkit exploit -> kernel exploit -> elfldr -> pldmgr (or the queued
- * payloads). main() flips the session to "ready" when the loader is up. */
+ * webkit exploit -> kernel exploit -> elfldr. Nothing is auto-sent after
+ * that - main() flips the session to "ready" and every payload (pldmgr
+ * included, from the evoX catalog) is one tap away in the manager. */
 window.startExploit = async function () {
   const session = window.RelapseSession;
   if (!session || session.state === "starting" || session.state === "running")
@@ -189,7 +220,6 @@ window.startExploit = async function () {
     writeLog(`WebKit base: 0x${getWebKitBase().toString(16)}`, "info");
     session.state = "running";
     if (window.RelapseUI) window.RelapseUI.setState("running");
-    await import("./relapse_exploit.js");
     await main(primitive);
   } catch (error) {
     session.state = "failed";
@@ -207,3 +237,4 @@ initPage().catch((error) => {
       error instanceof Error ? error.message : String(error));
   writeLog(error instanceof Error ? error.message : String(error), "error");
 });
+})();

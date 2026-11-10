@@ -1,4 +1,4 @@
-/* pldmgr delivery - direct socket injection into the ELF loader.
+/* Payload delivery - direct socket injection into the ELF loader.
  *
  * The kernel exploit leaves the browser process with root privileges, the
  * sandbox escaped and a working ROP chain (relapse_exploit.js already runs
@@ -14,12 +14,15 @@
  * the tail up to the last section end) with MSG_WAITALL, so the payload is
  * spawned the moment those bytes have arrived; the connection is NOT closed
  * and becomes the payload's stdin/stdout/stderr (SO_NOSIGPIPE is set on it,
- * so the payload survives the page closing). pldmgr then serves its
- * dashboard on port 8084 - connecting there is the success check.
+ * so the payload survives the page closing).
  *
  * Ordering guarantee: nothing in this module runs before the kernel exploit
  * (main.js calls it only after runKernelExploit finished and elfldr is up).
- */
+ *
+ * Classic script (loaded by the bootstrap in index.html): exposes
+ * window.RelapseInject so main.js can call it without a module import. */
+(function () {
+"use strict";
 
 const INJECT_AF_INET = 2;
 const INJECT_SOCK_STREAM = 1;
@@ -112,11 +115,12 @@ async function writeAllToSocket(p, chain, fd, bytes, say, onProgress) {
       throw new Error("the ELF loader closed the connection at " + offset + "/" + total + " bytes");
     throw new Error("socket write failed with errno " + -written + " at " + offset + "/" + total + " bytes");
   }
-  if (say) say("pldmgr bytes streamed to the ELF loader (" + total + " bytes)", "info");
+  if (say) say("payload bytes streamed to the ELF loader (" + total + " bytes)", "info");
 }
 
-/* Is anything listening on 127.0.0.1:port? Used both to detect a pldmgr that
- * is already running (port 8084) and to confirm the freshly injected one. */
+/* Is anything listening on 127.0.0.1:port? Used both to detect a payload
+ * that is already running (e.g. a daemon with a dashboard port) and to
+ * confirm a freshly injected one. */
 async function probePort(p, chain, port, windowMs) {
   const deadline = Date.now() + windowMs;
   const sa = sockaddrIn(p, port);
@@ -132,7 +136,7 @@ async function probePort(p, chain, port, windowMs) {
   return false;
 }
 
-/* Reads pldmgr's stdout from the injection socket and mirrors the first
+/* Reads the payload's stdout from the injection socket and mirrors the first
  * lines into the on-screen log - visible proof that the payload is alive.
  * The socket is made non-blocking first so a quiet stdout can never stall
  * the ROP worker; without fcntl the socket is simply left open (its send
@@ -211,7 +215,7 @@ function manualHandoverLink(target, name, say) {
 /* Injects `bytes` (a Uint8Array holding a full ELF) into the ELF loader on
  * 127.0.0.1:loaderPort. Returns the open socket fd whose stdout stream the
  * payload now writes to, or throws with the exact stage that failed. */
-export async function injectPayloadBytes(p, chain, bytes, options) {
+async function injectPayloadBytes(p, chain, bytes, options) {
   const opts = options || {};
   const say = opts.say || (() => {});
   const name = opts.name || "payload";
@@ -259,12 +263,13 @@ export async function injectPayloadBytes(p, chain, bytes, options) {
   throw lastError || new Error("the ELF loader did not take the payload");
 }
 
-/* Full pldmgr delivery used by main.js: skip when pldmgr already runs, else
- * inject, mirror its stdout, and confirm the dashboard answers on 8084. */
-export async function deliverViaLoader(p, chain, bytes, options) {
+/* Full delivery used for daemons with a known port: skip when the daemon is
+ * already running, else inject, mirror its stdout, and confirm the port
+ * answers (e.g. a payload dashboard). */
+async function deliverViaLoader(p, chain, bytes, options) {
   const opts = options || {};
   const say = opts.say || (() => {});
-  const name = opts.name || "pldmgr";
+  const name = opts.name || "payload";
   const version = opts.version || "";
   const label = name + (version ? " v" + version : "");
   const dashboardPort = opts.dashboardPort || 8084;
@@ -287,4 +292,12 @@ export async function deliverViaLoader(p, chain, bytes, options) {
   return false;
 }
 
-export { beaconHandover, manualHandoverLink, probePort, drainPayloadStdout };
+window.RelapseInject = {
+  injectPayloadBytes: injectPayloadBytes,
+  deliverViaLoader: deliverViaLoader,
+  beaconHandover: beaconHandover,
+  manualHandoverLink: manualHandoverLink,
+  probePort: probePort,
+  drainPayloadStdout: drainPayloadStdout,
+};
+})();

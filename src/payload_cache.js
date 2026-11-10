@@ -1,5 +1,6 @@
 /* PS5 payload cache - single source of truth for every binary the exploit
- * needs (elfldr, pldmgr, kexp shellcode).
+ * auto-loads (elfldr and the kexp shellcode - nothing else runs on its own;
+ * every manager payload arrives from the evoX-CoreOS catalog).
  *
  * Resolution order (cache-first, network-last):
  *   1. PS5 localStorage (survives reloads; written the moment the page opens)
@@ -7,7 +8,7 @@
  *   3. network fetch of payloads/<file> (written back to localStorage)
  *
  * preloadAll() is called as soon as the page opens - before the exploit
- * stages - so both elfldr AND pldmgr are saved to PS5 storage immediately.
+ * stages - so both binaries are saved to PS5 storage immediately.
  */
 (function () {
   "use strict";
@@ -15,7 +16,6 @@
   const REGISTRY = [
     { name: "kexp", version: "2026-05-25", fallbackUrl: "payloads/kexp_2026_05_25.bin", cacheKey: "relapse:payload:kexp:2026-05-25" },
     { name: "elfldr", version: "13.60", fallbackUrl: "payloads/elfldr-ps5-1360.elf", cacheKey: "relapse:payload:elfldr:13.60" },
-    { name: "pldmgr", version: "0.6.3", fallbackUrl: "payloads/pldmgr_v0.6.3.elf", cacheKey: "relapse:payload:pldmgr:0.6.3" },
   ];
   window.PS5_PAYLOAD_ENTRIES = {};
   for (const entry of REGISTRY) window.PS5_PAYLOAD_ENTRIES[entry.name] = entry;

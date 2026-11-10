@@ -1,4 +1,7 @@
-import { int64 } from "./utils/int64.js";
+/* Classic script (loaded by the bootstrap in index.html). Exposes runKexp as
+ * window.RelapseKexp for src/relapse_exploit.js. */
+(function () {
+"use strict";
 
 const O_NONBLOCK = 0x4;
 const PROT_RW = 0x3, PROT_RWX = 0x7;
@@ -6,8 +9,8 @@ const MAP_SHARED = 0x1, MAP_PRIVATE_ANON = 0x1002;
 
 /* Payload binaries (the kexp shellcode and elfldr) are resolved through
  * window.PS5PayloadCache (src/payload_cache.js): PS5 localStorage first, then
- * the base64 copy embedded in src/payload_data.js, then network. pldmgr is
- * NOT started here - see the comment inside runKexp below. */
+ * the base64 copy embedded in src/payload_data.js, then network. elfldr is
+ * the ONLY payload started here - see the comment inside runKexp below. */
 const ELFLODR_SPAWN_TIMEOUT_MS = 30000;
 
 function withTimeout(promise, ms, message) {
@@ -246,7 +249,7 @@ async function spawnAndJoin(entry, args, symbols, p, chain) {
   return { joinResult: joined.low >>> 0, shellcodeResult: p.read8(result) };
 }
 
-export async function runKexp(krw, p, chain, log) {
+async function runKexp(krw, p, chain, log) {
   const say = typeof log === "function" ? log : () => {};
   const allprocRva = window.KRW && window.KRW.allproc;
   if (!krw || !krw.ktextBase || !krw.procFdAddr)
@@ -261,7 +264,7 @@ export async function runKexp(krw, p, chain, log) {
 
   const cache = window.PS5PayloadCache;
   const registry = window.PS5_PAYLOAD_ENTRIES || {};
-  if (!cache || !registry.elfldr || !registry.pldmgr || !registry.kexp)
+  if (!cache || !registry.elfldr || !registry.kexp)
     throw new Error("kexp: payload cache is unavailable");
 
   /* 1/2 - the kexp shellcode is resolved, patched and mapped FIRST, so the
@@ -278,8 +281,9 @@ export async function runKexp(krw, p, chain, log) {
    * browser then splash-loops on every launch until reboot. elfldr is the
    * full ps5-payload-dev loader: it resolves SPRX
    * (sys_dynlib_process_needed_and_relocate), spawns payloads as their own
-   * processes, and serves them on port 9021. pldmgr is delivered through it
-   * by main.js once this function returns. */
+   * processes, and serves them on port 9021. Everything the user picks in
+   * the payload manager (pldmgr included, from the evoX catalog) goes
+   * through that listener via main.js - nothing else auto-loads. */
   const elfldrBytes = await cache.resolve(registry.elfldr, say);
   const elfldr = await mapElfBytes(elfldrBytes, "elfldr", p, chain);
 
@@ -304,7 +308,7 @@ export async function runKexp(krw, p, chain, log) {
     return result;
   };
 
-  say("starting the kernel loader: elfldr first, pldmgr arrives through the ELF loader", "info");
+  say("starting the kernel loader: elfldr only - payloads are sent on demand from the manager", "info");
   let elfldrOk = false;
   let elfldrError = null;
   try {
@@ -324,7 +328,8 @@ export async function runKexp(krw, p, chain, log) {
     done: true,
     elfldrOk: elfldrOk,
     elfldrError: elfldrError,
-    pldmgrOk: false,
-    pldmgrError: null,
   };
 }
+
+window.RelapseKexp = { runKexp: runKexp };
+})();

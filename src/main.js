@@ -89,6 +89,22 @@ function jbmark(tag, detail) {
   } catch (e) {}
 }
 
+/* The rop worker script: on plain-http hosts the page boots from PS5
+ * localStorage, so the worker file may not exist on the network - build it
+ * from the cached copy instead. Falls back to the network URL. */
+function makeRopSlaveWorker() {
+  const text = window.__RELAPSE_ASSET_TEXT__ &&
+    window.__RELAPSE_ASSET_TEXT__("./src/utils/rop_slave.js");
+  if (text) {
+    try {
+      const url = URL.createObjectURL(
+        new Blob([text], { type: "application/javascript" }));
+      return new Worker(url);
+    } catch (e) { /* blob workers unsupported - use the network path */ }
+  }
+  return new Worker("./src/utils/rop_slave.js");
+}
+
 async function prepareRop(p) {
   const ctor = globalThis.__ps5NativeCtor;
   let webkitBase;
@@ -166,7 +182,7 @@ async function prepareRop(p) {
     p.write1(waddr, 0x0);
   }
 
-  const worker = new Worker("./src/utils/rop_slave.js");
+  const worker = makeRopSlaveWorker();
 
   async function waitForWorker() {
     return new Promise((resolve, reject) => {
@@ -260,32 +276,23 @@ async function prepareRop(p) {
 }
 
 /* ------------------------------------------------------------------
- * Delivery: pldmgr default + the built-in payload manager.
+ * Delivery: the built-in payload manager ONLY - nothing auto-loads.
  *
  * Ordering is strict: runKernelExploit above runs the kernel exploit FIRST,
- * its kernel loader starts elfldr on 127.0.0.1:9021, and only then does
- * anything below hand payloads over - via the direct socket injection in
- * src/inject.js, which streams the raw ELF into the loader exactly like the
- * documented `nc -q0 <ps5> 9021 < payload.elf` does, using ROP syscalls in
- * this now-root, sandbox-escaped process. No browser-HTTP hand-over (the
- * loader's `GET /?uri=` answers with HTTP 200 headers instantly, and https
- * pages block http://127.0.0.1 as mixed content anyway).
- *
- * Two delivery sources share that one path:
- *   - the default action still injects pldmgr (dashboard on port 8084);
- *   - the payload manager UI (src/ui.js) sends any evoX-CoreOS catalog
- *     payload - or a custom .elf the user picked - the same way, any time
- *     while this page stays open.
+ * its kernel loader starts elfldr on 127.0.0.1:9021 (the one payload that
+ * auto-runs), and NOTHING is sent after that on its own. Every payload -
+ * pldmgr included, straight from the evoX-CoreOS catalog, or a custom .elf -
+ * is handed over on demand through src/inject.js, which streams the raw ELF
+ * into the loader exactly like the documented `nc -q0 <ps5> 9021 <
+ * payload.elf` does, using ROP syscalls in this now-root, sandbox-escaped
+ * process. No browser-HTTP hand-over (the loader's `GET /?uri=` answers
+ * with HTTP 200 headers instantly, and https pages block http://127.0.0.1
+ * as mixed content anyway).
  *
  * Every post-exploit ROP launch goes through one serialized chain: the rop
  * worker executes one chain at a time, so concurrent deliveries (and their
  * stdout drains) queue up instead of interleaving inside the worker.
  * ------------------------------------------------------------------ */
-const PLDMGR_META = { name: "pldmgr", version: "0.6.3", file: "payloads/pldmgr_v0.6.3.elf" };
-
-function payloadUrl() {
-  return new URL(PLDMGR_META.file, location.href).href;
-}
 
 /* Wrap the rop chain so every syscall/call runs one at a time. */
 function makeSerializedChain(chain) {
@@ -418,46 +425,11 @@ async function runQueuedDelivery(inject, p, chain, item) {
   }
 }
 
-/* The default post-exploit action: pldmgr as its own process. */
-async function deliverPldmgr(p, chain, inject) {
-  const versions = window.PS5_PAYLOAD_ENTRIES || {};
-  const meta = versions.pldmgr || PLDMGR_META;
-  let delivered = false;
-  let bytes = null;
-  try {
-    const cache = window.PS5PayloadCache;
-    if (!cache || !cache.resolve)
-      throw new Error("the payload cache is unavailable");
-    bytes = await cache.resolve(meta, log);
-    delivered = await inject.deliverViaLoader(p, chain, bytes, {
-      name: meta.name || PLDMGR_META.name,
-      version: meta.version || PLDMGR_META.version,
-      loaderPort: 9021,
-      dashboardPort: 8084,
-      say: log,
-    });
-  } catch (e) {
-    log("pldmgr delivery failed: " + (e && e.message ? e.message : e), "error");
-  }
-
-  if (delivered) {
-    log("pldmgr v" + (meta.version || PLDMGR_META.version) +
-        " is running as its own process (dashboard on port 8084)", "success");
-    log("dashboard: http://<your-ps5-ip>:8084 - a PS5 notification shows the address", "info");
-    log("elfldr keeps listening on port 9021 - any payload in the list can be sent on top", "info");
-    return;
-  }
-
-  try {
-    if (bytes) await inject.beaconHandover(payloadUrl(), log);
-    inject.manualHandoverLink(payloadUrl(), meta.name || PLDMGR_META.name, log);
-  } catch (e) { /* keep the log clean - the port probe already reported */ }
-}
-
 async function main(userlandRW) {
   const { p, chain } = await prepareRop(userlandRW);
-  const { runKernelExploit } = await import("./relapse_exploit.js");
-  const result = await runKernelExploit(p, chain, log);
+  if (!window.RelapseKernel)
+    throw new Error("kernel exploit module is unavailable (src/relapse_exploit.js did not run)");
+  const result = await window.RelapseKernel.runKernelExploit(p, chain, log);
   if (!result || !result.done)
     throw new Error("kernel exploit did not finish");
 
@@ -478,7 +450,9 @@ async function main(userlandRW) {
         ") - the hand-over below keeps retrying the port", "error");
   }
 
-  const inject = await import("./inject.js");
+  const inject = window.RelapseInject;
+  if (!inject)
+    throw new Error("payload delivery module is unavailable (src/inject.js did not run)");
 
   /* Hand the live session to the payload manager UI. Every ROP call after
    * the kernel exploit goes through one serialized chain, so deliveries
@@ -495,15 +469,12 @@ async function main(userlandRW) {
       runQueuedDelivery(inject, p, safeChain, { type: "catalog", entry: entry }),
     customPayload: (name, bytes) =>
       runQueuedDelivery(inject, p, safeChain, { type: "custom", name: name, bytes: bytes }),
-    pldmgr: () =>
-      deliverPldmgr(p, safeChain, inject).catch((e) =>
-        log("pldmgr delivery failed: " + (e && e.message ? e.message : e), "error")),
   };
   if (window.RelapseUI) window.RelapseUI.setState("ready");
   log("payload manager unlocked - every payload below is one tap away", "success");
 
   /* If the user tapped payloads before (or while) the exploit ran, deliver
-   * them now instead of the pldmgr default. */
+   * them now. Otherwise nothing else runs - elfldr only. */
   const queue = session ? session.pending.splice(0, session.pending.length) : [];
   if (queue.length > 0) {
     log(queue.length + " payload(s) queued - delivering now", "info");
@@ -511,7 +482,7 @@ async function main(userlandRW) {
     return;
   }
 
-  await deliverPldmgr(p, safeChain, inject);
+  log("elfldr is the only payload auto-loaded - send anything else (pldmgr included) from the manager", "info");
 }
 
 /* offsets are loaded by site.js (cache-backed, deterministic ordering) */

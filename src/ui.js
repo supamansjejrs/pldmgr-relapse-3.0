@@ -293,12 +293,6 @@
       }
     }
 
-    var pldmgrBtn = byId("pldmgr-btn");
-    if (pldmgrBtn) {
-      if (next === "ready") pldmgrBtn.classList.remove("hidden");
-      else pldmgrBtn.classList.add("hidden");
-    }
-
     var fw = byId("initial-fw");
     if (fw) {
       if (next === "failed") {
@@ -413,12 +407,6 @@
     if (psStart) psStart.onclick = function () { startExploit(); };
     var runBtn = byId("run-btn");
     if (runBtn) runBtn.onclick = function () { startExploit(); };
-    var pldmgrBtn = byId("pldmgr-btn");
-    if (pldmgrBtn)
-      pldmgrBtn.onclick = function () {
-        if (window.RelapseDeliver && window.RelapseDeliver.pldmgr)
-          window.RelapseDeliver.pldmgr();
-      };
     var customSend = byId("custom-send");
     if (customSend) customSend.onclick = sendCustom;
 

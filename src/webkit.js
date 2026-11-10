@@ -1,3 +1,9 @@
+/* Classic script (loaded by the bootstrap in index.html). Exposes
+ * establishPrimitive as window.RelapseWebKit - module imports are unusable
+ * when the page boots from PS5 localStorage on plain-http hosts. */
+(function () {
+"use strict";
+
 const DUPLICATE_INDEX = 2;
 const CONTROL_INDEX = 0xffff;
 const LEAK_STRING_LENGTH = 924176;
@@ -707,7 +713,7 @@ function createMemoryWindow(holderAddress) {
   };
 }
 
-export function establishPrimitive(eventHandler = null) {
+function establishPrimitive(eventHandler = null) {
   if (settleResolve !== null)
     return Promise.reject(new Error("Already Running..."));
   if (
@@ -728,3 +734,5 @@ export function establishPrimitive(eventHandler = null) {
     startAttempt();
   });
 }
+window.RelapseWebKit = { establishPrimitive: establishPrimitive };
+})();
