@@ -9,7 +9,7 @@ function sliceBacking(backing, offset) {
   );
 }
 
-export function int64(low = 0, hi = 0) {
+function int64(low = 0, hi = 0) {
   this.low = low >>> 0;
   this.hi = hi >>> 0;
   this.backing = null;

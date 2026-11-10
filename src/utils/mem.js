@@ -1,4 +1,9 @@
-import { int64 } from "./int64.js";
+/* Classic script (loaded by the bootstrap in index.html). Exposes
+ * installWindowP as window.RelapseMem so src/site.js can call it without a
+ * module import - the page must stay loadable from PS5 localStorage on
+ * plain-http hosts, where module imports cannot be served from storage. */
+(function () {
+"use strict";
 
 let memory = null;
 
@@ -196,7 +201,7 @@ function leakval(object) {
   }
 }
 
-export function installWindowP(value) {
+function installWindowP(value) {
   if (!value || typeof value.setAddress !== "function") {
     throw new TypeError("mem: invalid memory window");
   }
@@ -217,3 +222,6 @@ export function installWindowP(value) {
   globalThis.p = primitive;
   return primitive;
 }
+
+window.RelapseMem = { installWindowP: installWindowP };
+})();
