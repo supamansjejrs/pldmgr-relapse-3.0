@@ -13,17 +13,19 @@
  * Releasing an update: bump VERSION below (any byte change to sw.js makes the
  * browser reinstall it and refresh the cache).
  */
-const VERSION = "relapse-pldmgr-v6.0";
+const VERSION = "relapse-pldmgr-v7.0";
 const CORE = [
   "./",
   "./index.html",
   "./src/payload_cache.js",
+  "./src/payload_catalog.js",
   "./src/payload_data.js",
   "./src/firmware.js",
   "./src/main.js",
   "./src/inject.js",
   "./src/rop.js",
   "./src/site.js",
+  "./src/ui.js",
   "./src/webkit.js",
   "./src/kexp.js",
   "./src/relapse_exploit.js",
@@ -66,7 +68,7 @@ self.addEventListener("fetch", (event) => {
   event.respondWith((async () => {
     const cache = await caches.open(VERSION);
     if (!keepFresh) {
-      const hit = await cache.match(request);
+      const hit = await cache.match(request, { ignoreSearch: true });
       if (hit) return hit;
     }
     try {
@@ -74,7 +76,7 @@ self.addEventListener("fetch", (event) => {
       if (fresh && fresh.status === 200) cache.put(request, fresh.clone());
       return fresh;
     } catch (e) {
-      const hit = await cache.match(request);
+      const hit = await cache.match(request, { ignoreSearch: true });
       if (hit) return hit;
       throw e;
     }

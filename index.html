@@ -2,23 +2,245 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="max-age=3600, must-revalidate">
-  <title>PS5-Relapse · elfldr + pldmgr</title>
+  <title>PS5-Relapse · pldmgr edition</title>
   <style>
+    /* WebKitty-inspired theme: gray-900 stage, gray-800 panels, blue-600
+     * accents, cyan-300 version text, rounded cards with category badges. */
+    * { box-sizing: border-box; }
     html, body {
-      background: #060606;
-      color: #fff;
+      margin: 0; padding: 0;
+      background: #111827; color: #fff;
+      font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .hidden { display: none !important; }
+
+    /* ---------------- initial screen ---------------- */
+    #initial-screen {
+      min-height: 100vh; position: relative;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px; text-align: center;
+    }
+    .top-header {
+      position: absolute; top: 20px; left: 24px; right: 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand { font-weight: 600; color: rgba(255,255,255,.8); font-size: 15px; }
+    .brand-badge {
+      padding: 2px 10px; border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,.2);
+      font-size: 12px; color: rgba(255,255,255,.65);
+    }
+    #ps-start {
+      width: 180px; height: 180px; border-radius: 9999px; border: none;
+      background: rgba(255,255,255,.05); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .3s, transform .3s;
+    }
+    #ps-start:hover { background: rgba(255,255,255,.1); transform: scale(1.03); }
+    #ps-start svg { width: 100px; height: 100px; }
+    #initial-title { margin-top: 20px; font-size: 26px; font-weight: 700; }
+    #initial-fw { margin-top: 8px; font-size: 16px; color: rgba(255,255,255,.7); min-height: 22px; }
+    #initial-fw.ok { color: #4ade80; }
+    #initial-fw.bad { color: #f87171; }
+    .btn-primary {
+      margin-top: 22px; background: #2563eb; color: #fff; border: none;
+      border-radius: 8px; padding: 14px 34px; font-size: 17px; font-weight: 600;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-primary:disabled { opacity: .55; cursor: default; }
+    .hint { margin-top: 14px; font-size: 13px; color: rgba(255,255,255,.5); max-width: 560px; line-height: 1.5; }
+
+    /* ---------------- exploit screen ---------------- */
+    #exploit-screen { min-height: 100vh; display: flex; flex-direction: column; }
+    .exploit-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px; gap: 12px; flex-wrap: wrap;
+    }
+    .pill {
+      padding: 4px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600;
+      border: 1px solid #475569; color: #cbd5e1;
+    }
+    .pill.starting, .pill.running { color: #60a5fa; border-color: #2563eb; }
+    .pill.ready { color: #4ade80; border-color: #16a34a; }
+    .pill.failed { color: #f87171; border-color: #dc2626; }
+    .panels {
+      display: flex; flex-wrap: wrap; gap: 16px;
+      padding: 0 24px 24px; max-width: 1500px; margin: 0 auto; width: 100%;
+    }
+    .panel {
+      background: #1f2937; border-radius: 10px; padding: 22px;
+      display: flex; flex-direction: column; min-width: 300px;
+    }
+    #exploit-panel { flex: 7 1 380px; }
+    #payload-panel { flex: 11 1 520px; }
+    .panel-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px; gap: 12px; flex-wrap: wrap;
+    }
+    .panel-head h2 { font-size: 19px; font-weight: 600; margin: 0; }
+    #fw-label { font-size: 13px; color: rgba(255,255,255,.55); }
+    #DebugConsole {
+      background: rgba(0,0,0,.5); border-radius: 8px; padding: 14px;
+      overflow-y: auto; flex: 1; min-height: 240px; max-height: 62vh;
+      font-family: Menlo, Consolas, "Courier New", monospace;
+      font-size: 12px; line-height: 1.55;
+    }
+    #console { white-space: pre-wrap; word-break: break-word; }
+    #console a { color: #7fd0ff; }
+    .log-error { color: #f87171; }
+    .log-success { color: #4ade80; }
+    .log-info { color: #93c5fd; }
+    .controls { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+    .btn-round {
+      width: 44px; height: 44px; border-radius: 9999px;
+      background: #2563eb; color: #fff; border: none; font-size: 17px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .btn-round:hover { background: #1d4ed8; }
+    .btn-round:disabled { opacity: .5; cursor: default; }
+    .btn-ghost {
+      background: transparent; border: 1px solid rgba(255,255,255,.25);
+      color: rgba(255,255,255,.8); border-radius: 8px; padding: 10px 16px;
+      font-size: 13px; cursor: pointer; font-family: inherit;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,.08); }
+
+    /* ---------------- payload manager ---------------- */
+    #payload-search {
+      background: #111827; border: 1px solid rgba(255,255,255,.2); color: #fff;
+      border-radius: 8px; padding: 9px 14px; font-size: 14px; width: 210px; outline: none;
+    }
+    #payload-search:focus { border-color: #2563eb; }
+    #tabs {
+      display: flex; flex-wrap: wrap; gap: 2px;
+      border-bottom: 1px solid #374151; margin-bottom: 12px;
+    }
+    .tab {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: rgba(255,255,255,.6); padding: 10px 14px; font-size: 14px;
+      cursor: pointer; font-family: inherit;
+    }
+    .tab:hover { color: rgba(255,255,255,.9); }
+    .tab.active { color: #fff; border-bottom-color: #2563eb; font-weight: 600; }
+    #payload-hint { font-size: 12.5px; color: rgba(255,255,255,.55); margin: 0 0 12px; }
+    #payloadsGrid {
+      overflow-y: auto; max-height: 62vh;
+      display: flex; flex-wrap: wrap; gap: 12px; align-content: flex-start;
+    }
+    .card {
+      width: calc(50% - 6px); min-width: 250px;
+      background: #1f2937; border: 1px solid rgba(255,255,255,.2);
+      border-radius: 12px; padding: 18px; cursor: pointer;
+      transition: transform .25s, border-color .25s;
+      text-align: left; color: #fff; font-size: 14px; font-family: inherit;
+    }
+    .card:hover { transform: scale(1.02); border-color: rgba(255,255,255,.4); }
+    .card.busy { opacity: .55; pointer-events: none; }
+    .card-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 8px; margin-bottom: 8px;
+    }
+    .card-name { font-size: 16px; font-weight: 600; }
+    .card-version { color: #67e8f9; font-size: 12px; margin-top: 2px; }
+    .badge {
+      padding: 2px 10px; border-radius: 9999px; font-size: 11px;
+      border: 1px solid; white-space: nowrap;
+    }
+    .card-desc { color: rgba(255,255,255,.7); font-size: 13px; line-height: 1.45; }
+    .card-foot { margin-top: 10px; font-size: 11.5px; color: rgba(255,255,255,.45); }
+    #custom-panel { display: flex; flex-direction: column; gap: 12px; max-width: 620px; width: 100%; }
+    #custom-panel p { color: rgba(255,255,255,.7); font-size: 14px; line-height: 1.5; margin: 0; }
+    #custom-file {
+      background: #111827; border: 1px solid rgba(255,255,255,.2); color: #fff;
+      border-radius: 8px; padding: 10px; font-size: 14px;
+    }
+    .empty-note { color: rgba(255,255,255,.5); font-size: 14px; padding: 18px 4px; }
+
+    @media (max-width: 860px) {
+      .card { width: 100%; }
+      #payload-search { width: 100%; }
     }
   </style>
 </head>
 <body>
-  <div id="console"></div>
-  <script src="./src/firmware.js?v=20261109a"></script>
-  <script src="./src/main.js?v=20261109a"></script>
-  <script src="./src/rop.js?v=20261109a"></script>
-  <script src="./src/utils/syscalls.js?v=20261109a"></script>
-  <script src="./src/payload_data.js?v=20261109a"></script>
-  <script src="./src/payload_cache.js?v=20261109a"></script>
-  <script type="module" src="./src/site.js?v=20261109a"></script>
+  <!-- ============ initial screen (WebKitty-style landing) ============ -->
+  <section id="initial-screen">
+    <header class="top-header">
+      <div class="brand">Relapse &middot; pldmgr edition</div>
+      <div class="brand-badge">evoX-CoreOS payloads</div>
+    </header>
+
+    <button id="ps-start" title="Start the jailbreak" aria-label="Start the jailbreak">
+      <svg viewBox="0 0 32 32" fill="#3B82F6" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M0.69116 21.9548C-0.506476 22.7935 -0.284724 24.2384 2.44769 25.1419C5.18011 26.0455 8.35603 26.2323 11.1505 25.729C11.0707 25.729 11.3102 25.729 11.1505 25.729V22.8774L8.43588 23.8C7.39792 24.1355 6.35997 24.2194 5.32202 23.9677C4.5236 23.7161 4.68328 23.2129 5.64139 22.7935L11.1505 20.7806V17.6774L3.48565 20.4452C2.52754 20.7806 1.56943 21.2839 0.69116 21.9548ZM19.2146 9.37419V17.5097C22.4881 19.1871 25.0431 17.5097 25.0431 13.1484C25.0431 8.70323 23.5261 6.69032 19.1348 5.09677C16.8193 4.25806 14.4241 3.50323 12.0288 3V27.2387L17.6178 29V8.61935C17.6178 7.69677 17.6178 7.02581 18.2565 7.27742C19.1348 7.52903 19.2146 8.45161 19.2146 9.37419ZM29.5941 20.0258C27.2787 19.1871 24.8036 18.8516 22.4083 19.1032C21.0779 19.1906 19.8294 19.5869 18.5759 20.0258V23.2968L23.7656 21.2839C24.8036 20.9484 25.8415 20.8645 26.8795 21.1161C27.6779 21.3677 27.5182 21.871 26.5601 22.2903L18.5759 25.3935V28.5806L29.5941 24.3032C30.3925 23.9677 31.1111 23.5484 31.7499 22.8774C32.3088 22.0387 32.0692 20.8645 29.5941 20.0258Z"/>
+      </svg>
+    </button>
+    <h1 id="initial-title">PS5 Relapse</h1>
+    <p id="initial-fw">Detecting firmware&hellip;</p>
+    <button id="start-btn" class="btn-primary" type="button">Start Jailbreak</button>
+    <p class="hint">
+      elfldr and pldmgr are saved to this console the moment the page opens.
+      Tap Start (or the logo) to jailbreak, then send any payload from the
+      built-in payload manager - no extra hosting needed.
+    </p>
+  </section>
+
+  <!-- ============ exploit screen: console + payload manager ============ -->
+  <section id="exploit-screen" class="hidden">
+    <header class="exploit-header">
+      <div class="brand">Relapse &middot; pldmgr edition</div>
+      <div id="state-pill" class="pill idle">ready to start</div>
+    </header>
+
+    <main class="panels">
+      <!-- left: exploit status + debug console -->
+      <div class="panel" id="exploit-panel">
+        <div class="panel-head">
+          <h2>Exploit status</h2>
+          <span id="fw-label"></span>
+        </div>
+        <div id="DebugConsole"><div id="console"></div></div>
+        <div class="controls">
+          <button id="run-btn" class="btn-round hidden" type="button" title="Run the jailbreak again">&#9654;</button>
+          <button id="pldmgr-btn" class="btn-ghost hidden" type="button">send pldmgr again</button>
+        </div>
+      </div>
+
+      <!-- right: payload manager -->
+      <div class="panel" id="payload-panel">
+        <div class="panel-head">
+          <h2>Payloads</h2>
+          <input id="payload-search" type="text" placeholder="Search payloads..." autocomplete="off" />
+        </div>
+        <nav id="tabs"></nav>
+        <p id="payload-hint">tap a payload to jailbreak and send it in one go</p>
+        <div id="payloadsGrid">
+          <div id="cards-wrap" style="display:flex;flex-wrap:wrap;gap:12px;width:100%;align-content:flex-start;"></div>
+          <div id="custom-panel" class="hidden">
+            <p>Send your own payload file (.elf) straight to the ELF loader on
+               127.0.0.1:9021 - it runs as its own process, just like the
+               payloads from the catalog.</p>
+            <input id="custom-file" type="file" accept=".elf" />
+            <div>
+              <button id="custom-send" class="btn-primary" type="button" style="margin-top:0;">Send payload</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <script src="./src/firmware.js?v=20261111a"></script>
+  <script src="./src/main.js?v=20261111a"></script>
+  <script src="./src/rop.js?v=20261111a"></script>
+  <script src="./src/utils/syscalls.js?v=20261111a"></script>
+  <script src="./src/payload_data.js?v=20261111a"></script>
+  <script src="./src/payload_cache.js?v=20261111a"></script>
+  <script src="./src/payload_catalog.js?v=20261111a"></script>
+  <script src="./src/ui.js?v=20261111a"></script>
+  <script type="module" src="./src/site.js?v=20261111a"></script>
 </body>
 </html>
