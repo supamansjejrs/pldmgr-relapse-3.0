@@ -13,6 +13,10 @@ function writeLog(message, type = "log", replace = false) {
   if (type === "error") marker = "-";
   if (type === "info" || type === "success") marker = "+";
   line.textContent = `[${marker}] ${message}`;
+  line.className = type === "log" ? "" : "log-" + type;
+  /* keep the console bounded during long retry loops */
+  while (output.childElementCount > 400)
+    output.removeChild(output.firstElementChild);
   output.scrollTop = output.scrollHeight;
 }
 
@@ -136,26 +140,70 @@ function getWebKitBase() {
   throw new Error("WebKit base not found");
 }
 
-async function run() {
+/* ------------------------------------------------------------------
+ * Page boot. Nothing here runs the exploit: the chain waits for the
+ * Start button (or a payload card tap, which queues + auto-starts).
+ * ------------------------------------------------------------------ */
+async function initPage() {
+  if (window.RelapseUI) window.RelapseUI.init();
+
   const rejection = window.firmware.rejection();
-  if (rejection)
-    throw new Error(rejection);
+  if (rejection) throw new Error(rejection);
+
   writeLog("Credits: Sonic_Iso, Jordy, ntfargo, ufm42, Dr. Yenyen, TheFlow, SlidyBat, Flatz, cow, nhk, bollarz, Sleirsgoevy, EchoStretch, EarthOnion", "info");
   preloadSiteData();
   registerServiceWorker();
   writeLog(`Agent: ${navigator.userAgent}`, "info");
   writeLog(`Firmware: ${window.fw_str}`, "info");
   await loadOffsets(window.fw_str);
+
   const versions = window.PS5_PAYLOAD_ENTRIES || {};
   writeLog("Payloads: kexp v" + ((versions.kexp || {}).version || "2026-05-25") +
-    " maps first, elfldr v" + ((versions.elfldr || {}).version || "13.60") +
+    " runs first, elfldr v" + ((versions.elfldr || {}).version || "13.60") +
     " starts on port 9021, pldmgr v" + ((versions.pldmgr || {}).version || "0.6.3") +
-    " is injected straight into it over a raw socket (all saved to PS5 storage)", "info");
-  const primitive = await getPrimitive();
-  writeLog(`WebKit base: 0x${getWebKitBase().toString(16)}`, "info");
+    " is injected straight into it (all saved to PS5 storage)", "info");
+  writeLog("press Start Jailbreak - or tap any payload to jailbreak and send it in one go", "info");
 
-  await import("./relapse_exploit.js");
-  await main(primitive);
+  if (window.RelapseUI) window.RelapseUI.setState("idle");
 }
 
-run().catch((error) => writeLog(error instanceof Error ? error.message : String(error), "error"));
+/* The start button / payload-card entry point. Runs the full chain:
+ * webkit exploit -> kernel exploit -> elfldr -> pldmgr (or the queued
+ * payloads). main() flips the session to "ready" when the loader is up. */
+window.startExploit = async function () {
+  const session = window.RelapseSession;
+  if (!session || session.state === "starting" || session.state === "running")
+    return;
+  if (session.state === "ready") {
+    writeLog("the payload loader is already up - just tap a payload", "info");
+    return;
+  }
+
+  try {
+    session.state = "starting";
+    if (window.RelapseUI) {
+      window.RelapseUI.showExploitScreen();
+      window.RelapseUI.setState("starting");
+    }
+    const primitive = await getPrimitive();
+    writeLog(`WebKit base: 0x${getWebKitBase().toString(16)}`, "info");
+    session.state = "running";
+    if (window.RelapseUI) window.RelapseUI.setState("running");
+    await import("./relapse_exploit.js");
+    await main(primitive);
+  } catch (error) {
+    session.state = "failed";
+    if (window.RelapseUI)
+      window.RelapseUI.setState("failed",
+        error instanceof Error ? error.message : String(error));
+    writeLog(error instanceof Error ? error.message : String(error), "error");
+    writeLog("press Retry to run the jailbreak again", "info");
+  }
+};
+
+initPage().catch((error) => {
+  if (window.RelapseUI)
+    window.RelapseUI.setState("failed",
+      error instanceof Error ? error.message : String(error));
+  writeLog(error instanceof Error ? error.message : String(error), "error");
+});

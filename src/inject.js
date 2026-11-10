@@ -92,8 +92,9 @@ async function connectLoopback(p, chain, port, deadline, say) {
 
 /* Streams the whole ELF into the socket. The blocking socket accepts full
  * chunks; partial writes (signals, short socket buffers) just advance the
- * cursor, so the loop converges no matter how the kernel splits it. */
-async function writeAllToSocket(p, chain, fd, bytes, say) {
+ * cursor, so the loop converges no matter how the kernel splits it.
+ * onProgress(sent, total) fires after every advance for UI progress lines. */
+async function writeAllToSocket(p, chain, fd, bytes, say, onProgress) {
   const source = p.read8(p.leakval(bytes).add32(0x10));
   const total = bytes.length;
   let offset = 0;
@@ -102,6 +103,9 @@ async function writeAllToSocket(p, chain, fd, bytes, say) {
     const written = (await safeSyscall(chain, SYS_WRITE, fd, source.add32(offset), length)).low | 0;
     if (written > 0) {
       offset += written;
+      if (onProgress) {
+        try { onProgress(offset, total); } catch (e) { /* progress is cosmetic */ }
+      }
       continue;
     }
     if (written === 0)
@@ -215,6 +219,7 @@ export async function injectPayloadBytes(p, chain, bytes, options) {
   const loaderPort = opts.loaderPort || 9021;
   const connectWindowMs = opts.connectWindowMs || INJECT_CONNECT_WINDOW_MS;
   const writeAttempts = opts.writeAttempts || INJECT_WRITE_ATTEMPTS;
+  const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
   const label = name + (version ? " v" + version : "");
 
   for (const number of [SYS_SOCKET, SYS_CONNECT, SYS_WRITE, SYS_CLOSE])
@@ -234,7 +239,7 @@ export async function injectPayloadBytes(p, chain, bytes, options) {
       throw new Error("nothing answered on 127.0.0.1:" + loaderPort + " - the ELF loader is not up");
 
     try {
-      await writeAllToSocket(p, chain, fd, bytes, say);
+      await writeAllToSocket(p, chain, fd, bytes, say, onProgress);
     } catch (e) {
       lastError = e;
       await safeSyscall(chain, SYS_CLOSE, fd);
@@ -282,4 +287,4 @@ export async function deliverViaLoader(p, chain, bytes, options) {
   return false;
 }
 
-export { beaconHandover, manualHandoverLink, probePort };
+export { beaconHandover, manualHandoverLink, probePort, drainPayloadStdout };
