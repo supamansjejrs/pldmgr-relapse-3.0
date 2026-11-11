@@ -13,7 +13,7 @@
  * Releasing an update: bump VERSION below (any byte change to sw.js makes the
  * browser reinstall it and refresh the cache).
  */
-const VERSION = "relapse-pldmgr-v9.0";
+const VERSION = "relapse-pldmgr-v9.1";
 const CORE = [
   "./",
   "./index.html",
