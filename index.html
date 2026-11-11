@@ -126,6 +126,25 @@
     .tab:hover { color: rgba(255,255,255,.9); }
     .tab.active { color: #fff; border-bottom-color: #2563eb; font-weight: 600; }
     #payload-hint { font-size: 12.5px; color: rgba(255,255,255,.55); margin: 0 0 12px; }
+    #ps5-cache-banner {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; margin: 0 0 12px;
+      background: rgba(37,99,235,.12); border: 1px solid rgba(37,99,235,.5);
+      color: #dbeafe; border-radius: 10px; padding: 12px 16px;
+      font-size: 13.5px; font-family: inherit; text-align: left; cursor: pointer;
+      transition: background .2s, border-color .2s;
+    }
+    #ps5-cache-banner:hover { background: rgba(37,99,235,.22); border-color: #2563eb; }
+    #ps5-cache-banner.busy { opacity: .55; pointer-events: none; }
+    #ps5-cache-banner.done {
+      background: rgba(22,163,74,.1); border-color: rgba(22,163,74,.5); color: #bbf7d0;
+      cursor: default; pointer-events: none;
+    }
+    #ps5-cache-banner .ps5-led {
+      width: 10px; height: 10px; border-radius: 9999px; background: #60a5fa;
+      box-shadow: 0 0 8px rgba(96,165,250,.8); flex: none;
+    }
+    #ps5-cache-banner.done .ps5-led { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.8); }
     #payloadsGrid {
       overflow-y: auto; max-height: 62vh;
       display: flex; flex-wrap: wrap; gap: 12px; align-content: flex-start;
@@ -215,6 +234,10 @@
           <input id="payload-search" type="text" placeholder="Search payloads..." autocomplete="off" />
         </div>
         <nav id="tabs"></nav>
+        <button id="ps5-cache-banner" class="hidden" type="button">
+          <span class="ps5-led"></span>
+          <span id="ps5-cache-text">Cache site to PS5 &middot; the console serves this site on port 12423, fully offline</span>
+        </button>
         <p id="payload-hint">tap a payload to jailbreak and send it in one go</p>
         <div id="payloadsGrid">
           <div id="cards-wrap" style="display:flex;flex-wrap:wrap;gap:12px;width:100%;align-content:flex-start;"></div>
@@ -250,7 +273,7 @@
   (function () {
     "use strict";
 
-    var VERSION = "20261112a";
+    var VERSION = "20261112b";
 
     /* Executed in this order - dependency-safe (see each file's header). */
     var ASSETS = [
@@ -264,8 +287,10 @@
       "./src/relapse_exploit.js",
       "./src/inject.js",
       "./src/payload_data.js",
+      "./src/site_files.js",
       "./src/payload_cache.js",
       "./src/payload_catalog.js",
+      "./src/ps5_site_cache.js",
       "./src/main.js",
       "./src/ui.js",
       "./src/site.js"

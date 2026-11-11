@@ -13,13 +13,15 @@
  * Releasing an update: bump VERSION below (any byte change to sw.js makes the
  * browser reinstall it and refresh the cache).
  */
-const VERSION = "relapse-pldmgr-v8.0";
+const VERSION = "relapse-pldmgr-v9.0";
 const CORE = [
   "./",
   "./index.html",
   "./src/payload_cache.js",
   "./src/payload_catalog.js",
   "./src/payload_data.js",
+  "./src/site_files.js",
+  "./src/ps5_site_cache.js",
   "./src/firmware.js",
   "./src/main.js",
   "./src/inject.js",
@@ -62,6 +64,7 @@ self.addEventListener("fetch", (event) => {
 
   const keepFresh = url.pathname.endsWith("/") ||
     url.pathname.endsWith("index.html") ||
+    url.pathname.endsWith("manifest.json") ||
     (url.pathname.includes("/offsets/") && url.pathname.endsWith(".js"));
 
   event.respondWith((async () => {
