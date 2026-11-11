@@ -357,9 +357,13 @@ function isElfBytes(bytes) {
 
 /* Send one evoX-CoreOS catalog payload: download (CORS is open on the
  * evoX host), verify ELF magic + sha256, stream into elfldr, then mirror
- * its first stdout lines so the payload itself confirms it is alive. */
+ * its first stdout lines so the payload itself confirms it is alive.
+ * Local-host entries (PS5 Storage cards, same-origin "payloads/..." URLs
+ * from /manifest.json) go through the identical path - they are just
+ * downloaded from this host instead of evoX. */
 async function deliverCatalogPayload(p, chain, inject, entry, log) {
-  log("downloading " + entry.name + " (" + (entry.version || "") + ") from evoX-CoreOS...", "info");
+  log("downloading " + entry.name + " (" + (entry.version || "") + ") " +
+      (entry.local ? "from this host's storage..." : "from evoX-CoreOS..."), "info");
   const bytes = await fetchWithProgress(entry.url, log, entry.name);
   if (!isElfBytes(bytes))
     throw new Error(entry.name + " is not an ELF payload");
@@ -413,11 +417,40 @@ function makeSocketProgressLogger(label, log) {
   };
 }
 
+/* One tap on "Cache site to PS5": write every site file to console storage
+ * (/data/relapse-site) and start sitesrv, the on-console server on port
+ * 12423 - the webkit-autoloader flow, from this page. */
+async function deliverPs5SiteCache(inject, p, chain) {
+  if (!window.PS5SiteCache)
+    throw new Error("the PS5 site cache module is unavailable (src/ps5_site_cache.js did not run)");
+  if (window.PS5SiteCache.isPs5Served()) {
+    log("this page is already served by your PS5 (sitesrv, port 12423) - nothing to cache", "info");
+    return;
+  }
+  await window.PS5SiteCache.cacheAndStart(p, chain, log);
+}
+
+/* After a clean chain with no PS5-cache request queued: bring the on-console
+ * site server back up (elfldr -> file:/data/relapse-site/payloads/sitesrv.elf)
+ * so the PS5 serves this site on port 12423 for the rest of the session. */
+async function autoStartSitesrv(inject, p, chain) {
+  if (!window.PS5SiteCache) return;
+  try {
+    await window.PS5SiteCache.startSitesrv(p, chain, log);
+  } catch (e) {
+    log("sitesrv auto-start failed: " + (e && e.message ? e.message : e), "error");
+  }
+}
+
 async function runQueuedDelivery(inject, p, chain, item) {
-  const label = item.type === "custom" ? item.name : (item.entry && item.entry.name) || "payload";
+  const label = item.type === "custom" ? item.name
+    : item.type === "ps5site" ? "PS5 site cache"
+    : (item.entry && item.entry.name) || "payload";
   try {
     if (item.type === "custom")
       await deliverCustomBytes(p, chain, inject, item.name, item.bytes, log);
+    else if (item.type === "ps5site")
+      await deliverPs5SiteCache(inject, p, chain);
     else
       await deliverCatalogPayload(p, chain, inject, item.entry, log);
   } catch (e) {
@@ -469,6 +502,8 @@ async function main(userlandRW) {
       runQueuedDelivery(inject, p, safeChain, { type: "catalog", entry: entry }),
     customPayload: (name, bytes) =>
       runQueuedDelivery(inject, p, safeChain, { type: "custom", name: name, bytes: bytes }),
+    ps5SiteCache: () =>
+      runQueuedDelivery(inject, p, safeChain, { type: "ps5site" }),
   };
   if (window.RelapseUI) window.RelapseUI.setState("ready");
   log("payload manager unlocked - every payload below is one tap away", "success");
@@ -476,13 +511,19 @@ async function main(userlandRW) {
   /* If the user tapped payloads before (or while) the exploit ran, deliver
    * them now. Otherwise nothing else runs - elfldr only. */
   const queue = session ? session.pending.splice(0, session.pending.length) : [];
+  const hadSiteCache = queue.some((item) => item.type === "ps5site");
   if (queue.length > 0) {
     log(queue.length + " payload(s) queued - delivering now", "info");
     for (const item of queue) await runQueuedDelivery(inject, p, safeChain, item);
-    return;
+  } else {
+    log("elfldr is the only payload auto-loaded - send anything else (pldmgr included) from the manager", "info");
   }
 
-  log("elfldr is the only payload auto-loaded - send anything else (pldmgr included) from the manager", "info");
+  /* Either way: if the site is cached on the PS5, sitesrv comes back up
+   * now (file: URI hand-over through the loader) and the console serves
+   * this site on http://localhost:12423 for the rest of the session. */
+  if (!hadSiteCache)
+    await autoStartSitesrv(inject, p, safeChain);
 }
 
 /* offsets are loaded by site.js (cache-backed, deterministic ordering) */

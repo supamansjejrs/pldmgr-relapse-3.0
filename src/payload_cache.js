@@ -16,6 +16,10 @@
   const REGISTRY = [
     { name: "kexp", version: "2026-05-25", fallbackUrl: "payloads/kexp_2026_05_25.bin", cacheKey: "relapse:payload:kexp:2026-05-25" },
     { name: "elfldr", version: "13.60", fallbackUrl: "payloads/elfldr-ps5-1360.elf", cacheKey: "relapse:payload:elfldr:13.60" },
+    /* optional: embedded only when payloads/sitesrv.elf exists at build time
+     * (scripts/build_payload_js.py). The PS5 site cache needs it - without it
+     * preloadAll stays quiet and the Cache-site button explains what to do. */
+    { name: "sitesrv", version: "1.0", fallbackUrl: "payloads/sitesrv.elf", cacheKey: "relapse:payload:sitesrv:1.0", optional: true },
   ];
   window.PS5_PAYLOAD_ENTRIES = {};
   for (const entry of REGISTRY) window.PS5_PAYLOAD_ENTRIES[entry.name] = entry;
@@ -131,7 +135,8 @@
         const bytes = await fetchBytes(entry);
         if (await validate(entry.name, bytes)) writeCache(entry, { bytes: bytes }, say);
       } catch (e) {
-        if (say) say(entry.name + " preload failed: " + (e && e.message ? e.message : e), "info");
+        if (!entry.optional && say)
+          say(entry.name + " preload failed: " + (e && e.message ? e.message : e), "info");
       }
     }
   }

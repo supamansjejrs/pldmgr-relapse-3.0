@@ -179,6 +179,51 @@ async function drainPayloadStdout(p, chain, fd, name, say, windowMs) {
   }
 }
 
+/* Hand a URI to the ELF loader instead of raw bytes - the loader's other
+ * wire format (ps5-payload-dev socksrv.c): a connection whose first four
+ * bytes are "file" (or "http") is read line-by-line as a URI, then
+ * uri_get_content() fetches it and the payload is spawned with this socket
+ * as stdio. `file:/data/relapse-site/payloads/sitesrv.elf` is what starts
+ * the on-console site server after every jailbreak - no bytes flow from the
+ * page, the loader reads console storage directly. Returns the socket fd
+ * (the spawned payload's stdout) for draining. */
+async function sendUriToLoader(p, chain, uri, options) {
+  const opts = options || {};
+  const say = opts.say || (() => {});
+  const name = opts.name || "payload";
+  const loaderPort = opts.loaderPort || 9021;
+  const connectWindowMs = opts.connectWindowMs || INJECT_CONNECT_WINDOW_MS;
+
+  for (const number of [SYS_SOCKET, SYS_CONNECT, SYS_WRITE, SYS_CLOSE])
+    if (!hasSyscall(p, number))
+      throw new Error("this firmware does not expose the socket syscalls needed for the URI hand-over");
+  if (typeof uri !== "string" || !uri.length)
+    throw new Error("no URI to hand over");
+
+  say("handing " + name + " to the ELF loader over 127.0.0.1:" + loaderPort + " (uri: " + uri + ")", "info");
+
+  const deadline = Date.now() + connectWindowMs;
+  const fd = await connectLoopback(p, chain, loaderPort, deadline, say);
+  if (fd < 0)
+    throw new Error("nothing answered on 127.0.0.1:" + loaderPort + " - the ELF loader is not up");
+
+  /* one line, newline-terminated: that is exactly what payload_readuri() reads */
+  const bytes = new Uint8Array(uri.length + 1);
+  for (let i = 0; i < uri.length; i++) bytes[i] = uri.charCodeAt(i) & 0xff;
+  bytes[uri.length] = 0x0a;
+
+  try {
+    await writeAllToSocket(p, chain, fd, bytes, say, opts.onProgress);
+  } catch (e) {
+    await safeSyscall(chain, SYS_CLOSE, fd);
+    throw e;
+  }
+
+  if (hasSyscall(p, SYS_SHUTDOWN))
+    await safeSyscall(chain, SYS_SHUTDOWN, fd, INJECT_SHUT_WR);
+  return fd;
+}
+
 /* Fallback A - browser-HTTP hand-over through the loader's mini HTTP server
  * (`GET /?uri=<payload url>`). Fire-and-forget: elfldr answers with valid
  * HTTP 200 headers immediately, so no-cors fetch/img results say nothing
@@ -294,6 +339,7 @@ async function deliverViaLoader(p, chain, bytes, options) {
 
 window.RelapseInject = {
   injectPayloadBytes: injectPayloadBytes,
+  sendUriToLoader: sendUriToLoader,
   deliverViaLoader: deliverViaLoader,
   beaconHandover: beaconHandover,
   manualHandoverLink: manualHandoverLink,

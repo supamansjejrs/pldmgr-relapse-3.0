@@ -30,6 +30,7 @@
     { id: "loaders", label: "Loaders" },
     { id: "servers", label: "Servers" },
     { id: "debug", label: "Debug" },
+    { id: "local", label: "Local" },
     { id: "custom", label: "Custom" },
   ];
 
@@ -39,6 +40,7 @@
     loaders: "#a78bfa",
     servers: "#60a5fa",
     debug: "#fb923c",
+    local: "#facc15",
   };
 
   /* same mapping the build script uses, applied to entries fetched live */
@@ -78,6 +80,13 @@
   var searchTimer = null;
   var started = false;
 
+  /* same-origin payload listing (/manifest.json, generated live by sitesrv
+   * on the PS5 and by serve.py on a PC) - these cards send from THIS host,
+   * so they keep working with the internet gone. */
+  var localEntries = [];
+  var MANIFEST_URL = "manifest.json";
+  var MANIFEST_KEY = "relapse:manifest:site";
+
   function byId(id) { return document.getElementById(id); }
   function say(message, type) {
     if (typeof window.writeLog === "function") window.writeLog(message, type || "log");
@@ -88,7 +97,8 @@
     });
   }
   function catalog() {
-    return (window.PS5_PAYLOAD_CATALOG && window.PS5_PAYLOAD_CATALOG.entries) || [];
+    return ((window.PS5_PAYLOAD_CATALOG && window.PS5_PAYLOAD_CATALOG.entries) || [])
+      .concat(localEntries);
   }
 
   /* ------------------------------------------------------------------ */
@@ -133,7 +143,9 @@
         cardBadge(entry) +
       "</div>" +
       '<div class="card-desc">' + escapeHtml(entry.description || "") + "</div>" +
-      '<div class="card-foot">via evoX-CoreOS &middot; tap to send</div>';
+      '<div class="card-foot">' + (entry.local
+        ? "on this host &middot; tap to send"
+        : "via evoX-CoreOS &middot; tap to send") + "</div>";
     card.onclick = function () { onCardClick(entry, card); };
     return card;
   }
@@ -185,6 +197,8 @@
       /* race: the session flipped to ready between the card check and here */
       if (item.type === "custom")
         window.RelapseDeliver.customPayload(item.name, item.bytes);
+      else if (item.type === "ps5site")
+        window.RelapseDeliver.ps5SiteCache();
       else
         window.RelapseDeliver.catalogPayload(item.entry);
       return;
@@ -382,6 +396,101 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* local-host payload listing (/manifest.json) + PS5 cache banner      */
+  /* ------------------------------------------------------------------ */
+
+  function applyLocalManifest(data, fresh) {
+    if (!data || !data.payloads || !data.payloads.length) return;
+    localEntries = data.payloads.map(function (raw, index) {
+      return {
+        id: "local" + index,
+        local: true,
+        name: raw.name || raw.filename || ("payload " + index),
+        version: raw.version || "",
+        category: raw.category || "PS5 Storage",
+        group: "local",
+        description: raw.description || "Payload stored on this host's storage",
+        filename: raw.filename || "payload.elf",
+        url: raw.url || ("payloads/" + (raw.filename || "")),
+        sha256: raw.checksum || raw.sha256 || "",
+      };
+    });
+    say(localEntries.length + " payload(s) on this host's storage (Local tab)" +
+        (fresh ? "" : " - cached copy"), "info");
+    renderTabs();
+    renderCards();
+  }
+
+  /* Fetch the live listing (sitesrv / serve.py generate it); offline boots
+   * fall back to the localStorage copy so the Local tab never empties. */
+  function refreshLocalManifest() {
+    if (typeof fetch !== "function") return;
+    var controller = null;
+    var timer = setTimeout(function () {
+      if (controller && typeof controller.abort === "function") controller.abort();
+    }, 8000);
+    fetch(MANIFEST_URL).then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    }).then(function (data) {
+      clearTimeout(timer);
+      try {
+        localStorage.setItem(MANIFEST_KEY, JSON.stringify({ time: Date.now(), data: data }));
+      } catch (e) { /* storage full - live copy still applies */ }
+      applyLocalManifest(data, true);
+    }).catch(function () {
+      clearTimeout(timer);
+      var cached = null;
+      try { cached = JSON.parse(localStorage.getItem(MANIFEST_KEY) || "null"); } catch (e) {}
+      if (cached && cached.data) applyLocalManifest(cached.data, false);
+    });
+  }
+
+  /* The "Cache site to PS5" banner: writes the site to /data/relapse-site
+   * through the live ROP session and starts sitesrv (port 12423). On a
+   * PS5-served page it becomes the green "you are on the console copy" tag. */
+  function initPs5Banner() {
+    var banner = byId("ps5-cache-banner");
+    var text = byId("ps5-cache-text");
+    if (!banner || !text) return;
+
+    if (window.PS5SiteCache && window.PS5SiteCache.isPs5Served()) {
+      banner.classList.remove("hidden");
+      banner.classList.add("done");
+      text.textContent = "You're on the PS5-served copy - sitesrv is serving " +
+        "this page from /data/relapse-site on port 12423";
+      return;
+    }
+
+    banner.classList.remove("hidden");
+    banner.onclick = function () {
+      var session = window.RelapseSession;
+      if (session && session.state === "ready" && window.RelapseDeliver &&
+          window.RelapseDeliver.ps5SiteCache) {
+        banner.classList.add("busy");
+        var promise;
+        try {
+          promise = window.RelapseDeliver.ps5SiteCache();
+        } catch (e) {
+          say("PS5 site cache failed: " + (e && e.message ? e.message : e), "error");
+          banner.classList.remove("busy");
+          return;
+        }
+        if (promise && typeof promise.finally === "function")
+          promise.finally(function () {
+            banner.classList.remove("busy");
+            banner.classList.add("done");
+            text.textContent = "Site cached to the PS5 - the console now serves " +
+              "it on http://localhost:12423";
+          });
+        return;
+      }
+      queueAndMaybeStart({ type: "ps5site" }, "PS5 site cache");
+      text.textContent = "PS5 site cache queued - it runs once the jailbreak finishes";
+    };
+  }
+
+  /* ------------------------------------------------------------------ */
   /* init                                                                 */
   /* ------------------------------------------------------------------ */
 
@@ -411,7 +520,9 @@
     if (customSend) customSend.onclick = sendCustom;
 
     setState("idle");
+    initPs5Banner();
     refreshCatalog();
+    refreshLocalManifest();
   }
 
   function startExploit() {

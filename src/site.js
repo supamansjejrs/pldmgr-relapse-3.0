@@ -184,6 +184,10 @@ async function initPage() {
   writeLog("Credits: Sonic_Iso, Jordy, ntfargo, ufm42, Dr. Yenyen, TheFlow, SlidyBat, Flatz, cow, nhk, bollarz, Sleirsgoevy, EchoStretch, EarthOnion", "info");
   preloadSiteData();
   registerServiceWorker();
+  /* "served by your PS5" badge + console line when sitesrv (port 12423)
+   * is the host - the webkit-autoloader end state. */
+  if (window.PS5SiteCache && window.PS5SiteCache.bootBanner)
+    window.PS5SiteCache.bootBanner();
   writeLog(`Agent: ${navigator.userAgent}`, "info");
   writeLog(`Firmware: ${window.fw_str}`, "info");
   await loadOffsets(window.fw_str);
